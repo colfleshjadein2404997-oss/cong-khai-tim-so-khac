@@ -1,0 +1,15 @@
+{
+  "version": 6,
+  "model": "audience-learning-v6",
+  "global_stats": {
+    "n": 0.0,
+    "sum": 0.0,
+    "sum_sq": 0.0
+  },
+  "feature_stats": {},
+  "position_stats": {},
+  "thumbnail_stats": {},
+  "videos": [],
+  "total_learned_videos": 0,
+  "last_metrics_refresh": null
+}
