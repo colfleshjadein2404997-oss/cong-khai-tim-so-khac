@@ -1,9 +1,68 @@
 {
   "version": 6,
   "generator": "qd-audience-v6",
-  "used_thumbnail_signatures": [],
-  "used_palette_signatures": [],
-  "used_thumbnails": [],
-  "used_palettes": [],
-  "recent_profiles": []
+  "used_thumbnail_signatures": [
+    "40275fa67f1675dfad428a93"
+  ],
+  "used_palette_signatures": [
+    "bab983999010e2fe683d"
+  ],
+  "used_thumbnails": [
+    {
+      "signature": "40275fa67f1675dfad428a93",
+      "video_sequence": 2,
+      "puzzle_signature": "7ee9f4c6529756fad359479d",
+      "grammar": "alternating",
+      "mutation": "double_substitute",
+      "layout": 2,
+      "headline": 4,
+      "score": 1.0,
+      "audience_predicted": 0.5,
+      "audience_exploration": 1.0,
+      "audience_evidence": 0.0,
+      "v6_score": 0.9764
+    }
+  ],
+  "used_palettes": [
+    {
+      "signature": "bab983999010e2fe683d",
+      "video_sequence": 2,
+      "bg1": [
+        71,
+        72,
+        244
+      ],
+      "bg2": [
+        238,
+        31,
+        216
+      ],
+      "accent": [
+        242,
+        240,
+        62
+      ],
+      "novelty": 1.0
+    }
+  ],
+  "recent_profiles": [
+    {
+      "video_sequence": 2,
+      "layout": 2,
+      "headline": 4,
+      "palette_signature": "bab983999010e2fe683d"
+    }
+  ],
+  "last_video_sequence": 2,
+  "total_unique_thumbnails": 1,
+  "audience_model": {
+    "model": "audience-learning-v6",
+    "version": 6,
+    "learned_videos": 0,
+    "tracked_videos": 0,
+    "feature_count": 0,
+    "thumbnail_feature_count": 0,
+    "global_reward_mean": 0.5,
+    "global_evidence": 0.0
+  }
 }
