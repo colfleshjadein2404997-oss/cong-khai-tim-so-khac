@@ -36,7 +36,6 @@ jobs:
       QUIZ_FPS: "60"
       QUIZ_OUTPUT_DIR: "dist"
       QUIZ_WORK_DIR: "work"
-      QUIZ_THUMBNAIL_GAME: "1"
 
       YT_PRIVACY_STATUS: "private"
       YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
@@ -103,7 +102,7 @@ jobs:
             echo "::error::TITLE_START must be >= 1"
             exit 1
           fi
-          for file in generate_quiz_jp.py generate_quiz_jp_v2.py puzzles_jp.json requirements.txt; do
+          for file in generate_quiz_jp.py puzzles_jp.json requirements.txt; do
             if [ ! -f "$file" ]; then
               echo "::error::Missing private source file: $file"
               exit 1
@@ -115,7 +114,7 @@ jobs:
               exit 1
             fi
           done
-          python -m py_compile generate_quiz_jp.py generate_quiz_jp_v2.py
+          python -m py_compile generate_quiz_jp.py
 
       - name: Resolve run sequence, seed, title and description
         working-directory: control
@@ -205,7 +204,7 @@ jobs:
 
       - name: Generate enhanced video and thumbnail
         working-directory: private-source
-        run: python generate_quiz_jp_v2.py
+        run: python generate_quiz_jp.py
 
       - name: Verify rendered assets
         working-directory: private-source
