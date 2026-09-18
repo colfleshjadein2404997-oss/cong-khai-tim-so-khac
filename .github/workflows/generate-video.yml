@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: tim-so-khac-${{ github.ref }}
@@ -15,23 +15,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
 
-    defaults:
-      run:
-        shell: bash
-        working-directory: private-source
-
     env:
       PRIVATE_REPO: "colfleshjadein2404997-oss/TIM-SO-KHAC"
       PRIVATE_REF: "main"
+      PUBLIC_REF: "main"
       PYTHONUNBUFFERED: "1"
 
-      # Former workflow inputs live here now. Edit these two values directly.
+      # Hai giá trị trước đây là workflow inputs. Muốn đổi thì sửa trực tiếp tại đây.
       QUIZ_GAME_COUNT: "40"
       QUIZ_SEED_BASE: "20260917"
 
-      # Sequence controls. The next generate-video run is #2, so #2 starts sequence 0.
-      # SEQ_BASE_RUN = workflow run number treated as sequence 0.
-      # TITLE_START = 1-based line in tieude.txt used for sequence 0.
+      # Điều khiển thứ tự run / tiêu đề.
+      # Run có số SEQ_BASE_RUN được tính là sequence 0.
+      # TITLE_START là số dòng (bắt đầu từ 1) trong tieude.txt dùng cho sequence 0.
       SEQ_BASE_RUN: "2"
       TITLE_START: "1"
 
@@ -42,7 +38,6 @@ jobs:
       QUIZ_WORK_DIR: "work"
       QUIZ_THUMBNAIL_GAME: "1"
 
-      # Keep uploads private unless this workflow is intentionally redesigned.
       YT_PRIVACY_STATUS: "private"
       YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
       YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
@@ -50,7 +45,6 @@ jobs:
 
     steps:
       - name: Check required secrets
-        working-directory: .
         env:
           PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: |
@@ -66,6 +60,14 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout public control repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PUBLIC_REF }}
+          path: control
+          fetch-depth: 1
+          persist-credentials: true
+
       - name: Checkout private TIM-SO-KHAC source
         uses: actions/checkout@v4
         with:
@@ -74,7 +76,7 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: private-source
           fetch-depth: 1
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -83,7 +85,8 @@ jobs:
           cache: pip
           cache-dependency-path: private-source/requirements.txt
 
-      - name: Validate configuration and private source
+      - name: Validate configuration and source
+        working-directory: private-source
         run: |
           if ! [[ "$QUIZ_GAME_COUNT" =~ ^([1-9]|[1-3][0-9]|40)$ ]]; then
             echo "::error::QUIZ_GAME_COUNT must be from 1 to 40; got: $QUIZ_GAME_COUNT"
@@ -100,15 +103,22 @@ jobs:
             echo "::error::TITLE_START must be >= 1"
             exit 1
           fi
-          for file in generate_quiz_jp.py generate_quiz_jp_v2.py puzzles_jp.json requirements.txt tieude.txt mota.txt tieudedalay.txt; do
+          for file in generate_quiz_jp.py generate_quiz_jp_v2.py puzzles_jp.json requirements.txt; do
             if [ ! -f "$file" ]; then
               echo "::error::Missing private source file: $file"
+              exit 1
+            fi
+          done
+          for file in ../control/tieude.txt ../control/mota.txt ../control/tieudedalay.txt; do
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing public control file: $file"
               exit 1
             fi
           done
           python -m py_compile generate_quiz_jp.py generate_quiz_jp_v2.py
 
       - name: Resolve run sequence, seed, title and description
+        working-directory: control
         env:
           CURRENT_RUN: ${{ github.run_number }}
         run: |
@@ -145,17 +155,19 @@ jobs:
                   selected = titles[idx]
                   selected_index = idx
                   break
+
           if selected is None:
               selected_index = preferred
               selected = titles[selected_index]
-              print("::warning::All titles in tieude.txt are already in tieudedalay.txt; reusing cyclically.")
+              print("::warning::All titles have already been used; reusing cyclically.")
 
           description = Path("mota.txt").read_text(encoding="utf-8").strip()
           description = description.replace("{game_count}", os.environ["QUIZ_GAME_COUNT"])
           description = description.replace("{sequence}", str(sequence + 1))
 
-          Path("dist").mkdir(parents=True, exist_ok=True)
-          Path("dist/upload_meta.json").write_text(
+          out = Path("../private-source/dist")
+          out.mkdir(parents=True, exist_ok=True)
+          (out / "upload_meta.json").write_text(
               json.dumps(
                   {
                       "title": selected[:100],
@@ -183,6 +195,7 @@ jobs:
           PYCODE
 
       - name: Install runtime
+        working-directory: private-source
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
@@ -190,10 +203,12 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install google-api-python-client google-auth google-auth-httplib2
 
-      - name: Generate enhanced Japanese quiz video and thumbnail
+      - name: Generate enhanced video and thumbnail
+        working-directory: private-source
         run: python generate_quiz_jp_v2.py
 
       - name: Verify rendered assets
+        working-directory: private-source
         run: |
           shopt -s nullglob
           videos=(dist/*.mp4)
@@ -202,22 +217,16 @@ jobs:
             ls -lah dist/ || true
             exit 1
           fi
-          if [ ! -s dist/thumbnail.jpg ]; then
-            echo "::error::Missing dist/thumbnail.jpg"
-            exit 1
-          fi
-          if [ ! -s dist/upload_meta.json ]; then
-            echo "::error::Missing dist/upload_meta.json"
-            exit 1
-          fi
+          test -s dist/thumbnail.jpg || { echo "::error::Missing thumbnail"; exit 1; }
+          test -s dist/upload_meta.json || { echo "::error::Missing upload metadata"; exit 1; }
           ffprobe -v error \
             -show_entries format=duration,size \
             -show_entries stream=codec_name,width,height,r_frame_rate \
             -of json "${videos[0]}"
-          identify dist/thumbnail.jpg || true
           ls -lh dist/thumbnail.jpg dist/upload_meta.json
 
-      - name: Upload video, metadata and thumbnail to YouTube as private
+      - name: Upload video, title, description and thumbnail to YouTube
+        working-directory: private-source
         run: |
           python - <<'PYCODE'
           import glob
@@ -235,14 +244,13 @@ jobs:
               raise SystemExit(f"Expected exactly one rendered MP4, found {len(videos)}")
 
           thumb = Path("dist/thumbnail.jpg")
-          if not thumb.is_file():
-              raise SystemExit("Missing dist/thumbnail.jpg")
-
           meta = json.loads(Path("dist/upload_meta.json").read_text(encoding="utf-8"))
           title = str(meta["title"]).strip()[:100]
           description = str(meta["description"]).strip()
           if not title:
               raise SystemExit("Selected YouTube title is empty")
+          if not thumb.is_file():
+              raise SystemExit("Missing dist/thumbnail.jpg")
 
           required = ("YT_CLIENT_ID", "YT_CLIENT_SECRET", "YT_REFRESH_TOKEN")
           missing = [name for name in required if not os.getenv(name, "").strip()]
@@ -251,7 +259,7 @@ jobs:
 
           privacy = os.getenv("YT_PRIVACY_STATUS", "private").strip().lower()
           if privacy != "private":
-              raise SystemExit("Safety check failed: YT_PRIVACY_STATUS must remain 'private'")
+              raise SystemExit("YT_PRIVACY_STATUS must remain 'private'")
 
           creds = Credentials(
               token=None,
@@ -262,9 +270,8 @@ jobs:
               scopes=["https://www.googleapis.com/auth/youtube.upload"],
           )
           creds.refresh(Request())
-
           youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
-          video_path = Path(videos[0])
+
           request = youtube.videos().insert(
               part="snippet,status",
               body={
@@ -278,7 +285,7 @@ jobs:
                   "status": {"privacyStatus": "private"},
               },
               media_body=MediaFileUpload(
-                  str(video_path),
+                  videos[0],
                   mimetype="video/mp4",
                   chunksize=8 * 1024 * 1024,
                   resumable=True,
@@ -306,21 +313,25 @@ jobs:
           print("Custom thumbnail uploaded successfully.")
           PYCODE
 
-      - name: Record the used title
+      - name: Record used title in public history
+        working-directory: control
         run: |
-          printf '%s\n' "$SELECTED_TITLE" >> tieudedalay.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin "$PUBLIC_REF"
+          if ! grep -Fxq "$SELECTED_TITLE" tieudedalay.txt; then
+            printf '%s\n' "$SELECTED_TITLE" >> tieudedalay.txt
+          fi
           git add tieudedalay.txt
           if git diff --cached --quiet; then
-            echo "No title-history change to commit."
+            echo "Title is already present in tieudedalay.txt."
           else
             git commit -m "Track used YouTube title"
-            git push origin "HEAD:${PRIVATE_REF}"
+            git push origin "HEAD:${PUBLIC_REF}"
           fi
 
       - name: Remove local render files
         if: always()
         run: |
-          rm -rf dist work
-          echo "Local render files removed. No GitHub video artifact is retained by this workflow."
+          rm -rf private-source/dist private-source/work
+          echo "Local render files removed."
