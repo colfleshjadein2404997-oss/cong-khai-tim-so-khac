@@ -1,5 +1,9 @@
 {
-  "version": 2,
+  "version": 5,
+  "generator": "qd-novelty-v5",
+  "used_thumbnail_signatures": [],
+  "used_palette_signatures": [],
   "used_thumbnails": [],
-  "used_palettes": []
+  "used_palettes": [],
+  "recent_profiles": []
 }
