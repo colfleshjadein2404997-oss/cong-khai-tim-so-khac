@@ -37,6 +37,11 @@ jobs:
       QUIZ_OUTPUT_DIR: "dist"
       QUIZ_WORK_DIR: "work"
 
+      # Hai file này nằm trong repo công khai và được commit lại sau khi upload thành công.
+      # Generator đọc chúng để không lặp game, palette nền và thumbnail giữa các video.
+      QUIZ_GAME_HISTORY_FILE: "../control/game_history.json"
+      QUIZ_THUMB_HISTORY_FILE: "../control/thumb_history.json"
+
       YT_PRIVACY_STATUS: "private"
       YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
       YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
@@ -102,19 +107,26 @@ jobs:
             echo "::error::TITLE_START must be >= 1"
             exit 1
           fi
-          for file in generate_quiz_jp.py puzzles_jp.json requirements.txt; do
+          for file in generate_quiz_jp.py puzzle_generator.py requirements.txt; do
             if [ ! -f "$file" ]; then
               echo "::error::Missing private source file: $file"
               exit 1
             fi
           done
-          for file in ../control/tieude.txt ../control/mota.txt ../control/tieudedalay.txt; do
+          for file in ../control/tieude.txt ../control/mota.txt ../control/tieudedalay.txt ../control/game_history.json ../control/thumb_history.json; do
             if [ ! -f "$file" ]; then
               echo "::error::Missing public control file: $file"
               exit 1
             fi
           done
-          python -m py_compile generate_quiz_jp.py
+          python -m py_compile generate_quiz_jp.py puzzle_generator.py
+          python - <<'PYCODE'
+          import json
+          from pathlib import Path
+          for name in ("../control/game_history.json", "../control/thumb_history.json"):
+              json.loads(Path(name).read_text(encoding="utf-8"))
+              print("Valid history:", name)
+          PYCODE
 
       - name: Resolve run sequence, seed, title and description
         working-directory: control
@@ -202,7 +214,7 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install google-api-python-client google-auth google-auth-httplib2
 
-      - name: Generate enhanced video and thumbnail
+      - name: Generate unique video and thumbnail
         working-directory: private-source
         run: python generate_quiz_jp.py
 
@@ -222,6 +234,14 @@ jobs:
             -show_entries format=duration,size \
             -show_entries stream=codec_name,width,height,r_frame_rate \
             -of json "${videos[0]}"
+          python - <<'PYCODE'
+          import json
+          from pathlib import Path
+          gh = json.loads(Path("../control/game_history.json").read_text(encoding="utf-8"))
+          th = json.loads(Path("../control/thumb_history.json").read_text(encoding="utf-8"))
+          print("Recorded games:", gh.get("total_games", len(gh.get("used_games", []))))
+          print("Recorded thumbnails:", th.get("total_thumbnails", len(th.get("used_thumbnails", []))))
+          PYCODE
           ls -lh dist/thumbnail.jpg dist/upload_meta.json
 
       - name: Upload video, title, description and thumbnail to YouTube
@@ -312,21 +332,34 @@ jobs:
           print("Custom thumbnail uploaded successfully.")
           PYCODE
 
-      - name: Record used title in public history
+      - name: Record used title, games and thumbnail history
         working-directory: control
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin "$PUBLIC_REF"
+
+          # History files were changed by the renderer. Autostash keeps them safe if the
+          # public branch moved while the long render/upload was running.
+          git pull --rebase --autostash origin "$PUBLIC_REF"
+
           if ! grep -Fxq "$SELECTED_TITLE" tieudedalay.txt; then
             printf '%s\n' "$SELECTED_TITLE" >> tieudedalay.txt
           fi
-          git add tieudedalay.txt
+
+          git add tieudedalay.txt game_history.json thumb_history.json
           if git diff --cached --quiet; then
-            echo "Title is already present in tieudedalay.txt."
+            echo "No title/history changes to commit."
           else
-            git commit -m "Track used YouTube title"
-            git push origin "HEAD:${PUBLIC_REF}"
+            git commit -m "Track used title, games and thumbnail"
+            for attempt in 1 2 3; do
+              if git push origin "HEAD:${PUBLIC_REF}"; then
+                exit 0
+              fi
+              echo "Push attempt $attempt failed; rebasing and retrying..."
+              git pull --rebase --autostash origin "$PUBLIC_REF"
+            done
+            echo "::error::Could not persist title/game/thumbnail history after 3 attempts"
+            exit 1
           fi
 
       - name: Remove local render files
