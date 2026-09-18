@@ -37,15 +37,18 @@ jobs:
       QUIZ_OUTPUT_DIR: "dist"
       QUIZ_WORK_DIR: "work"
 
-      # Hai file này nằm trong repo công khai và được commit lại sau khi upload thành công.
-      # Generator đọc chúng để không lặp game, palette nền và thumbnail giữa các video.
+      # Persistent creativity / anti-repeat / audience-learning state in public control repo.
       QUIZ_GAME_HISTORY_FILE: "../control/game_history.json"
       QUIZ_THUMB_HISTORY_FILE: "../control/thumb_history.json"
+      QUIZ_AUDIENCE_HISTORY_FILE: "../control/audience_learning.json"
 
       YT_PRIVACY_STATUS: "private"
       YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
       YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
       YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+      # Optional: token granted yt-analytics.readonly + youtube.readonly.
+      # If absent, v6 safely stays in cold-start/exploration mode.
+      YT_ANALYTICS_REFRESH_TOKEN: ${{ secrets.YT_ANALYTICS_REFRESH_TOKEN }}
 
     steps:
       - name: Check required secrets
@@ -107,25 +110,52 @@ jobs:
             echo "::error::TITLE_START must be >= 1"
             exit 1
           fi
-          for file in generate_quiz_jp.py puzzle_generator.py requirements.txt; do
+
+          for file in \
+            generate_quiz_jp.py \
+            generate_quiz_v6.py \
+            puzzle_generator.py \
+            puzzle_generator_v6.py \
+            audience_learning.py \
+            refresh_audience_metrics.py \
+            requirements.txt; do
             if [ ! -f "$file" ]; then
               echo "::error::Missing private source file: $file"
               exit 1
             fi
           done
-          for file in ../control/tieude.txt ../control/mota.txt ../control/tieudedalay.txt ../control/game_history.json ../control/thumb_history.json; do
+
+          for file in \
+            ../control/tieude.txt \
+            ../control/mota.txt \
+            ../control/tieudedalay.txt \
+            ../control/game_history.json \
+            ../control/thumb_history.json \
+            ../control/audience_learning.json; do
             if [ ! -f "$file" ]; then
               echo "::error::Missing public control file: $file"
               exit 1
             fi
           done
-          python -m py_compile generate_quiz_jp.py puzzle_generator.py
+
+          python -m py_compile \
+            generate_quiz_jp.py \
+            generate_quiz_v6.py \
+            puzzle_generator.py \
+            puzzle_generator_v6.py \
+            audience_learning.py \
+            refresh_audience_metrics.py
+
           python - <<'PYCODE'
           import json
           from pathlib import Path
-          for name in ("../control/game_history.json", "../control/thumb_history.json"):
+          for name in (
+              "../control/game_history.json",
+              "../control/thumb_history.json",
+              "../control/audience_learning.json",
+          ):
               json.loads(Path(name).read_text(encoding="utf-8"))
-              print("Valid history:", name)
+              print("Valid state:", name)
           PYCODE
 
       - name: Resolve run sequence, seed, title and description
@@ -214,11 +244,16 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install google-api-python-client google-auth google-auth-httplib2
 
-      - name: Generate unique video and thumbnail
+      - name: Refresh Audience-Learning v6 from YouTube Analytics
         working-directory: private-source
-        run: python generate_quiz_jp.py
+        continue-on-error: true
+        run: python refresh_audience_metrics.py
 
-      - name: Verify rendered assets
+      - name: Generate v6 quality-diversity video and thumbnail
+        working-directory: private-source
+        run: python generate_quiz_v6.py
+
+      - name: Verify rendered assets and learning state
         working-directory: private-source
         run: |
           shopt -s nullglob
@@ -237,10 +272,13 @@ jobs:
           python - <<'PYCODE'
           import json
           from pathlib import Path
+          from audience_learning import model_summary
           gh = json.loads(Path("../control/game_history.json").read_text(encoding="utf-8"))
           th = json.loads(Path("../control/thumb_history.json").read_text(encoding="utf-8"))
-          print("Recorded games:", gh.get("total_games", len(gh.get("used_games", []))))
-          print("Recorded thumbnails:", th.get("total_thumbnails", len(th.get("used_thumbnails", []))))
+          print("Generator:", gh.get("generator"), "version", gh.get("version"))
+          print("Unique games:", gh.get("total_unique_games", len(gh.get("used_game_signatures", []))))
+          print("Unique thumbnails:", th.get("total_unique_thumbnails", len(th.get("used_thumbnail_signatures", []))))
+          print("Audience model:", model_summary(Path("../control/audience_learning.json")))
           PYCODE
           ls -lh dist/thumbnail.jpg dist/upload_meta.json
 
@@ -257,6 +295,7 @@ jobs:
           from google.oauth2.credentials import Credentials
           from googleapiclient.discovery import build
           from googleapiclient.http import MediaFileUpload
+          from audience_learning import attach_video_id, model_summary
 
           videos = sorted(glob.glob("dist/*.mp4"))
           if len(videos) != 1:
@@ -327,30 +366,33 @@ jobs:
           ).execute()
 
           Path("dist/youtube_video_id.txt").write_text(video_id + "\n", encoding="utf-8")
+          audience_path = Path(os.environ["QUIZ_AUDIENCE_HISTORY_FILE"])
+          attach_video_id(audience_path, int(os.environ["QUIZ_SEQUENCE"]), video_id)
           print(f"Uploaded PRIVATE YouTube video id: {video_id}")
           print(f"Title: {title}")
           print("Custom thumbnail uploaded successfully.")
+          print("Audience v6 tracking:", model_summary(audience_path))
           PYCODE
 
-      - name: Record used title, games and thumbnail history
+      - name: Record used title, games, thumbnail and audience-learning state
         working-directory: control
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # History files were changed by the renderer. Autostash keeps them safe if the
-          # public branch moved while the long render/upload was running.
+          # State files were changed by the renderer/analytics learner. Autostash keeps
+          # them safe if the public branch moved during the long render/upload.
           git pull --rebase --autostash origin "$PUBLIC_REF"
 
           if ! grep -Fxq "$SELECTED_TITLE" tieudedalay.txt; then
             printf '%s\n' "$SELECTED_TITLE" >> tieudedalay.txt
           fi
 
-          git add tieudedalay.txt game_history.json thumb_history.json
+          git add tieudedalay.txt game_history.json thumb_history.json audience_learning.json
           if git diff --cached --quiet; then
-            echo "No title/history changes to commit."
+            echo "No title/history/learning changes to commit."
           else
-            git commit -m "Track used title, games and thumbnail"
+            git commit -m "Track v6 title, novelty and audience learning"
             for attempt in 1 2 3; do
               if git push origin "HEAD:${PUBLIC_REF}"; then
                 exit 0
@@ -358,7 +400,7 @@ jobs:
               echo "Push attempt $attempt failed; rebasing and retrying..."
               git pull --rebase --autostash origin "$PUBLIC_REF"
             done
-            echo "::error::Could not persist title/game/thumbnail history after 3 attempts"
+            echo "::error::Could not persist v6 title/history/learning state after 3 attempts"
             exit 1
           fi
 
