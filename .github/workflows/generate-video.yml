@@ -1,16 +1,7 @@
-name: Generate private TIM-SO-KHAC video and upload to YouTube
+name: Generate TIM-SO-KHAC video and upload to YouTube
 
 on:
   workflow_dispatch:
-    inputs:
-      game_count:
-        description: Number of puzzles (1-40)
-        required: true
-        default: '40'
-      seed:
-        description: Random seed
-        required: true
-        default: '20260917'
 
 permissions:
   contents: read
@@ -22,7 +13,7 @@ concurrency:
 jobs:
   generate-and-upload:
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 240
 
     defaults:
       run:
@@ -34,23 +25,25 @@ jobs:
       PRIVATE_REF: "main"
       PYTHONUNBUFFERED: "1"
 
-      QUIZ_GAME_COUNT: "${{ inputs.game_count }}"
-      QUIZ_SEED: "${{ inputs.seed }}"
+      # Former workflow inputs live here now. Edit these two values directly.
+      QUIZ_GAME_COUNT: "40"
+      QUIZ_SEED_BASE: "20260917"
+
+      # Sequence controls. The next generate-video run is #2, so #2 starts sequence 0.
+      # SEQ_BASE_RUN = workflow run number treated as sequence 0.
+      # TITLE_START = 1-based line in tieude.txt used for sequence 0.
+      SEQ_BASE_RUN: "2"
+      TITLE_START: "1"
+
       QUIZ_WIDTH: "1920"
       QUIZ_HEIGHT: "1080"
       QUIZ_FPS: "60"
       QUIZ_OUTPUT_DIR: "dist"
       QUIZ_WORK_DIR: "work"
+      QUIZ_THUMBNAIL_GAME: "1"
 
-      # YouTube upload is intentionally fixed to PRIVATE.
+      # Keep uploads private unless this workflow is intentionally redesigned.
       YT_PRIVACY_STATUS: "private"
-      YT_TITLE: "脳トレ！数字・文字さがし40問｜観察力チャレンジ"
-      YT_DESCRIPTION: |-
-        数字と文字の中から、ひとつだけ違うものを見つける観察力クイズです。
-        全40問。集中力・観察力・脳トレに挑戦してみてください。
-
-        #脳トレ #観察力 #間違い探し #クイズ
-
       YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
       YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
       YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
@@ -81,7 +74,7 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: private-source
           fetch-depth: 1
-          persist-credentials: false
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -90,23 +83,104 @@ jobs:
           cache: pip
           cache-dependency-path: private-source/requirements.txt
 
-      - name: Validate inputs and private source
+      - name: Validate configuration and private source
         run: |
           if ! [[ "$QUIZ_GAME_COUNT" =~ ^([1-9]|[1-3][0-9]|40)$ ]]; then
-            echo "::error::game_count must be from 1 to 40; got: $QUIZ_GAME_COUNT"
+            echo "::error::QUIZ_GAME_COUNT must be from 1 to 40; got: $QUIZ_GAME_COUNT"
             exit 1
           fi
-          if ! [[ "$QUIZ_SEED" =~ ^-?[0-9]+$ ]]; then
-            echo "::error::seed must be an integer; got: $QUIZ_SEED"
+          for value_name in QUIZ_SEED_BASE SEQ_BASE_RUN TITLE_START; do
+            value="${!value_name}"
+            if ! [[ "$value" =~ ^-?[0-9]+$ ]]; then
+              echo "::error::$value_name must be an integer; got: $value"
+              exit 1
+            fi
+          done
+          if [ "$TITLE_START" -lt 1 ]; then
+            echo "::error::TITLE_START must be >= 1"
             exit 1
           fi
-          for file in generate_quiz_jp.py puzzles_jp.json requirements.txt; do
+          for file in generate_quiz_jp.py generate_quiz_jp_v2.py puzzles_jp.json requirements.txt tieude.txt mota.txt tieudedalay.txt; do
             if [ ! -f "$file" ]; then
               echo "::error::Missing private source file: $file"
               exit 1
             fi
           done
-          python -m py_compile generate_quiz_jp.py
+          python -m py_compile generate_quiz_jp.py generate_quiz_jp_v2.py
+
+      - name: Resolve run sequence, seed, title and description
+        env:
+          CURRENT_RUN: ${{ github.run_number }}
+        run: |
+          python - <<'PYCODE'
+          import json
+          import os
+          from pathlib import Path
+
+          run_no = int(os.environ["CURRENT_RUN"])
+          base_run = int(os.environ["SEQ_BASE_RUN"])
+          sequence = max(0, run_no - base_run)
+          seed = int(os.environ["QUIZ_SEED_BASE"]) + sequence
+
+          def meaningful_lines(path):
+              return [
+                  line.strip()
+                  for line in Path(path).read_text(encoding="utf-8").splitlines()
+                  if line.strip() and not line.lstrip().startswith("#")
+              ]
+
+          titles = meaningful_lines("tieude.txt")
+          if not titles:
+              raise SystemExit("tieude.txt has no usable titles")
+
+          used = set(meaningful_lines("tieudedalay.txt"))
+          start = (int(os.environ["TITLE_START"]) - 1) % len(titles)
+          preferred = (start + sequence) % len(titles)
+
+          selected = None
+          selected_index = None
+          for offset in range(len(titles)):
+              idx = (preferred + offset) % len(titles)
+              if titles[idx] not in used:
+                  selected = titles[idx]
+                  selected_index = idx
+                  break
+          if selected is None:
+              selected_index = preferred
+              selected = titles[selected_index]
+              print("::warning::All titles in tieude.txt are already in tieudedalay.txt; reusing cyclically.")
+
+          description = Path("mota.txt").read_text(encoding="utf-8").strip()
+          description = description.replace("{game_count}", os.environ["QUIZ_GAME_COUNT"])
+          description = description.replace("{sequence}", str(sequence + 1))
+
+          Path("dist").mkdir(parents=True, exist_ok=True)
+          Path("dist/upload_meta.json").write_text(
+              json.dumps(
+                  {
+                      "title": selected[:100],
+                      "description": description,
+                      "title_line": selected_index + 1,
+                      "sequence": sequence,
+                      "seed": seed,
+                  },
+                  ensure_ascii=False,
+                  indent=2,
+              ),
+              encoding="utf-8",
+          )
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"QUIZ_SEED={seed}\n")
+              env_file.write(f"QUIZ_SEQUENCE={sequence}\n")
+              env_file.write(f"SELECTED_TITLE_LINE={selected_index + 1}\n")
+              env_file.write("SELECTED_TITLE<<__TITLE__\n")
+              env_file.write(selected + "\n")
+              env_file.write("__TITLE__\n")
+
+          print(f"Run #{run_no} -> sequence {sequence}, seed {seed}, title line {selected_index + 1}")
+          print(f"Selected title: {selected}")
+          PYCODE
 
       - name: Install runtime
         run: |
@@ -116,10 +190,10 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install google-api-python-client google-auth google-auth-httplib2
 
-      - name: Generate Japanese quiz video
-        run: python generate_quiz_jp.py
+      - name: Generate enhanced Japanese quiz video and thumbnail
+        run: python generate_quiz_jp_v2.py
 
-      - name: Verify rendered video
+      - name: Verify rendered assets
         run: |
           shopt -s nullglob
           videos=(dist/*.mp4)
@@ -128,15 +202,26 @@ jobs:
             ls -lah dist/ || true
             exit 1
           fi
+          if [ ! -s dist/thumbnail.jpg ]; then
+            echo "::error::Missing dist/thumbnail.jpg"
+            exit 1
+          fi
+          if [ ! -s dist/upload_meta.json ]; then
+            echo "::error::Missing dist/upload_meta.json"
+            exit 1
+          fi
           ffprobe -v error \
             -show_entries format=duration,size \
             -show_entries stream=codec_name,width,height,r_frame_rate \
             -of json "${videos[0]}"
+          identify dist/thumbnail.jpg || true
+          ls -lh dist/thumbnail.jpg dist/upload_meta.json
 
-      - name: Upload to YouTube as private
+      - name: Upload video, metadata and thumbnail to YouTube as private
         run: |
           python - <<'PYCODE'
           import glob
+          import json
           import os
           from pathlib import Path
 
@@ -148,6 +233,16 @@ jobs:
           videos = sorted(glob.glob("dist/*.mp4"))
           if len(videos) != 1:
               raise SystemExit(f"Expected exactly one rendered MP4, found {len(videos)}")
+
+          thumb = Path("dist/thumbnail.jpg")
+          if not thumb.is_file():
+              raise SystemExit("Missing dist/thumbnail.jpg")
+
+          meta = json.loads(Path("dist/upload_meta.json").read_text(encoding="utf-8"))
+          title = str(meta["title"]).strip()[:100]
+          description = str(meta["description"]).strip()
+          if not title:
+              raise SystemExit("Selected YouTube title is empty")
 
           required = ("YT_CLIENT_ID", "YT_CLIENT_SECRET", "YT_REFRESH_TOKEN")
           missing = [name for name in required if not os.getenv(name, "").strip()]
@@ -169,10 +264,7 @@ jobs:
           creds.refresh(Request())
 
           youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
-          path = Path(videos[0])
-          title = os.getenv("YT_TITLE", "脳トレ！数字・文字さがし｜観察力チャレンジ").strip()[:100]
-          description = os.getenv("YT_DESCRIPTION", "").strip()
-
+          video_path = Path(videos[0])
           request = youtube.videos().insert(
               part="snippet,status",
               body={
@@ -183,12 +275,10 @@ jobs:
                       "defaultLanguage": "ja",
                       "defaultAudioLanguage": "ja",
                   },
-                  "status": {
-                      "privacyStatus": "private",
-                  },
+                  "status": {"privacyStatus": "private"},
               },
               media_body=MediaFileUpload(
-                  str(path),
+                  str(video_path),
                   mimetype="video/mp4",
                   chunksize=8 * 1024 * 1024,
                   resumable=True,
@@ -204,11 +294,33 @@ jobs:
           video_id = response.get("id")
           if not video_id:
               raise SystemExit(f"YouTube API returned no video id: {response}")
+
+          youtube.thumbnails().set(
+              videoId=video_id,
+              media_body=MediaFileUpload(str(thumb), mimetype="image/jpeg", resumable=False),
+          ).execute()
+
+          Path("dist/youtube_video_id.txt").write_text(video_id + "\n", encoding="utf-8")
           print(f"Uploaded PRIVATE YouTube video id: {video_id}")
+          print(f"Title: {title}")
+          print("Custom thumbnail uploaded successfully.")
           PYCODE
+
+      - name: Record the used title
+        run: |
+          printf '%s\n' "$SELECTED_TITLE" >> tieudedalay.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tieudedalay.txt
+          if git diff --cached --quiet; then
+            echo "No title-history change to commit."
+          else
+            git commit -m "Track used YouTube title"
+            git push origin "HEAD:${PRIVATE_REF}"
+          fi
 
       - name: Remove local render files
         if: always()
         run: |
           rm -rf dist work
-          echo "No GitHub artifact is uploaded by this workflow."
+          echo "Local render files removed. No GitHub video artifact is retained by this workflow."
