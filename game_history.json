@@ -1,5 +1,10 @@
 {
-  "version": 2,
+  "version": 5,
+  "generator": "qd-novelty-v5",
+  "used_game_signatures": [],
+  "used_palette_signatures": [],
   "used_games": [],
-  "used_palettes": []
+  "used_palettes": [],
+  "qd_archive": {},
+  "recent_video_profiles": []
 }
