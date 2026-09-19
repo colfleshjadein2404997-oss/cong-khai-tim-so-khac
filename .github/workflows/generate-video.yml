@@ -1,4 +1,4 @@
-name: Generate TIM-SO-KHAC video and upload to YouTube
+name: Generate English observation quiz video and upload to YouTube
 
 on:
   workflow_dispatch:
@@ -21,13 +21,8 @@ jobs:
       PUBLIC_REF: "main"
       PYTHONUNBUFFERED: "1"
 
-      # Hai giá trị trước đây là workflow inputs. Muốn đổi thì sửa trực tiếp tại đây.
       QUIZ_GAME_COUNT: "40"
       QUIZ_SEED_BASE: "20260917"
-
-      # Điều khiển thứ tự run / tiêu đề.
-      # Run có số SEQ_BASE_RUN được tính là sequence 0.
-      # TITLE_START là số dòng (bắt đầu từ 1) trong tieude.txt dùng cho sequence 0.
       SEQ_BASE_RUN: "2"
       TITLE_START: "1"
 
@@ -36,8 +31,8 @@ jobs:
       QUIZ_FPS: "60"
       QUIZ_OUTPUT_DIR: "dist"
       QUIZ_WORK_DIR: "work"
+      QUIZ_FONT: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
-      # Persistent creativity / anti-repeat / audience-learning state in public control repo.
       QUIZ_GAME_HISTORY_FILE: "../control/game_history.json"
       QUIZ_THUMB_HISTORY_FILE: "../control/thumb_history.json"
       QUIZ_AUDIENCE_HISTORY_FILE: "../control/audience_learning.json"
@@ -46,8 +41,6 @@ jobs:
       YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
       YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
       YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
-      # Optional: token granted yt-analytics.readonly + youtube.readonly.
-      # If absent, v6 safely stays in cold-start/exploration mode.
       YT_ANALYTICS_REFRESH_TOKEN: ${{ secrets.YT_ANALYTICS_REFRESH_TOKEN }}
 
     steps:
@@ -118,6 +111,7 @@ jobs:
             puzzle_generator_v6.py \
             audience_learning.py \
             refresh_audience_metrics.py \
+            visual_quality.py \
             requirements.txt; do
             if [ ! -f "$file" ]; then
               echo "::error::Missing private source file: $file"
@@ -144,7 +138,8 @@ jobs:
             puzzle_generator.py \
             puzzle_generator_v6.py \
             audience_learning.py \
-            refresh_audience_metrics.py
+            refresh_audience_metrics.py \
+            visual_quality.py
 
           python - <<'PYCODE'
           import json
@@ -158,7 +153,7 @@ jobs:
               print("Valid state:", name)
           PYCODE
 
-      - name: Resolve run sequence, seed, title and description
+      - name: Resolve run sequence, English title and English description
         working-directory: control
         env:
           CURRENT_RUN: ${{ github.run_number }}
@@ -182,7 +177,7 @@ jobs:
 
           titles = meaningful_lines("tieude.txt")
           if not titles:
-              raise SystemExit("tieude.txt has no usable titles")
+              raise SystemExit("tieude.txt has no usable English titles")
 
           used = set(meaningful_lines("tieudedalay.txt"))
           start = (int(os.environ["TITLE_START"]) - 1) % len(titles)
@@ -200,7 +195,7 @@ jobs:
           if selected is None:
               selected_index = preferred
               selected = titles[selected_index]
-              print("::warning::All titles have already been used; reusing cyclically.")
+              print("::warning::All English titles have already been used; reusing cyclically.")
 
           description = Path("mota.txt").read_text(encoding="utf-8").strip()
           description = description.replace("{game_count}", os.environ["QUIZ_GAME_COUNT"])
@@ -216,6 +211,7 @@ jobs:
                       "title_line": selected_index + 1,
                       "sequence": sequence,
                       "seed": seed,
+                      "language": "en",
                   },
                   ensure_ascii=False,
                   indent=2,
@@ -232,14 +228,14 @@ jobs:
               env_file.write("__TITLE__\n")
 
           print(f"Run #{run_no} -> sequence {sequence}, seed {seed}, title line {selected_index + 1}")
-          print(f"Selected title: {selected}")
+          print(f"Selected English title: {selected}")
           PYCODE
 
       - name: Install runtime
         working-directory: private-source
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install google-api-python-client google-auth google-auth-httplib2
@@ -249,7 +245,7 @@ jobs:
         continue-on-error: true
         run: python refresh_audience_metrics.py
 
-      - name: Generate v6 quality-diversity video and thumbnail
+      - name: Generate English v6 quality-diversity video and thumbnail
         working-directory: private-source
         run: python generate_quiz_v6.py
 
@@ -282,7 +278,7 @@ jobs:
           PYCODE
           ls -lh dist/thumbnail.jpg dist/upload_meta.json
 
-      - name: Upload video, title, description and thumbnail to YouTube
+      - name: Upload English video, title, description and thumbnail to YouTube
         working-directory: private-source
         run: |
           python - <<'PYCODE'
@@ -337,8 +333,8 @@ jobs:
                       "title": title,
                       "description": description,
                       "categoryId": "27",
-                      "defaultLanguage": "ja",
-                      "defaultAudioLanguage": "ja",
+                      "defaultLanguage": "en",
+                      "defaultAudioLanguage": "en",
                   },
                   "status": {"privacyStatus": "private"},
               },
@@ -368,20 +364,17 @@ jobs:
           Path("dist/youtube_video_id.txt").write_text(video_id + "\n", encoding="utf-8")
           audience_path = Path(os.environ["QUIZ_AUDIENCE_HISTORY_FILE"])
           attach_video_id(audience_path, int(os.environ["QUIZ_SEQUENCE"]), video_id)
-          print(f"Uploaded PRIVATE YouTube video id: {video_id}")
+          print(f"Uploaded PRIVATE English YouTube video id: {video_id}")
           print(f"Title: {title}")
-          print("Custom thumbnail uploaded successfully.")
+          print("Custom English thumbnail uploaded successfully.")
           print("Audience v6 tracking:", model_summary(audience_path))
           PYCODE
 
-      - name: Record used title, games, thumbnail and audience-learning state
+      - name: Record used English title, games, thumbnail and audience-learning state
         working-directory: control
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # State files were changed by the renderer/analytics learner. Autostash keeps
-          # them safe if the public branch moved during the long render/upload.
           git pull --rebase --autostash origin "$PUBLIC_REF"
 
           if ! grep -Fxq "$SELECTED_TITLE" tieudedalay.txt; then
@@ -392,7 +385,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No title/history/learning changes to commit."
           else
-            git commit -m "Track v6 title, novelty and audience learning"
+            git commit -m "Track English v6 title, novelty and audience learning"
             for attempt in 1 2 3; do
               if git push origin "HEAD:${PUBLIC_REF}"; then
                 exit 0
@@ -400,7 +393,7 @@ jobs:
               echo "Push attempt $attempt failed; rebasing and retrying..."
               git pull --rebase --autostash origin "$PUBLIC_REF"
             done
-            echo "::error::Could not persist v6 title/history/learning state after 3 attempts"
+            echo "::error::Could not persist English v6 state after 3 attempts"
             exit 1
           fi
 
