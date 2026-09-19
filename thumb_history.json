@@ -3,6 +3,7 @@
   "generator": "qd-audience-v6",
   "used_thumbnail_signatures": [
     "40275fa67f1675dfad428a93",
+    "5a96140abb3fa761b4842387",
     "5bcf761aa7364deda51f6abd",
     "6c4fa0764c07cf8b60b601a6",
     "df6a93f7f5155a7ba0fd96da"
@@ -11,6 +12,7 @@
     "2f12bfad96b33b2c12e1",
     "4d19e5a94a467e2a8be5",
     "bab983999010e2fe683d",
+    "d2e0364a134cafc3c17a",
     "e02ed3d04178985b232b"
   ],
   "used_thumbnails": [
@@ -69,6 +71,20 @@
       "audience_exploration": 1.0,
       "audience_evidence": 0.0,
       "v6_score": 0.66839
+    },
+    {
+      "signature": "5a96140abb3fa761b4842387",
+      "video_sequence": 6,
+      "puzzle_signature": "95a5627c579ede52709afb48",
+      "grammar": "palindrome",
+      "mutation": "mirror_break",
+      "layout": 1,
+      "headline": 1,
+      "score": 0.62255,
+      "audience_predicted": 0.5,
+      "audience_exploration": 1.0,
+      "audience_evidence": 0.0,
+      "v6_score": 0.64507
     }
   ],
   "used_palettes": [
@@ -151,6 +167,26 @@
         97
       ],
       "novelty": 0.32038
+    },
+    {
+      "signature": "d2e0364a134cafc3c17a",
+      "video_sequence": 6,
+      "bg1": [
+        252,
+        208,
+        75
+      ],
+      "bg2": [
+        64,
+        236,
+        34
+      ],
+      "accent": [
+        49,
+        113,
+        240
+      ],
+      "novelty": 0.27671
     }
   ],
   "recent_profiles": [
@@ -177,15 +213,21 @@
       "layout": 5,
       "headline": 2,
       "palette_signature": "4d19e5a94a467e2a8be5"
+    },
+    {
+      "video_sequence": 6,
+      "layout": 1,
+      "headline": 1,
+      "palette_signature": "d2e0364a134cafc3c17a"
     }
   ],
-  "last_video_sequence": 5,
-  "total_unique_thumbnails": 4,
+  "last_video_sequence": 6,
+  "total_unique_thumbnails": 5,
   "audience_model": {
     "model": "audience-learning-v6",
     "version": 6,
     "learned_videos": 0,
-    "tracked_videos": 0,
+    "tracked_videos": 1,
     "feature_count": 0,
     "thumbnail_feature_count": 0,
     "global_reward_mean": 0.5,
