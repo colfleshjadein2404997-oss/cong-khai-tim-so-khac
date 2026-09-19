@@ -1,10 +1,10 @@
-数字や文字の中から、1つだけ違うものを見つける観察力クイズです。
-全{game_count}問。EASY → MEDIUM → HARD と少しずつ難しくなります。
+Find the one different number or letter in each visual observation puzzle.
+There are {game_count} rounds, progressing from EASY to MEDIUM to HARD.
 
-各問題にはカウントダウンがあります。最後の5秒は通知音が鳴るので、時間切れになる前に見つけてみてください。
-答えは色が変わって点滅し、正解位置を見やすく表示します。
+Each round has a countdown. The final five seconds include alert tones, so try to spot the odd one before time runs out.
+The answer is highlighted clearly after each round so you can check your result immediately.
 
-今回のチャレンジ: #{sequence}
-あなたは何問正解できましたか？コメントでスコアを教えてください。
+Challenge #{sequence}
+How many did you get right? Share your score in the comments.
 
-#脳トレ #観察力 #間違い探し #数字探し #文字探し #クイズ
+#BrainTeaser #ObservationQuiz #OddOneOut #VisualPuzzle #FindTheDifference #Quiz
